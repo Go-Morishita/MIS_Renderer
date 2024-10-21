@@ -134,9 +134,11 @@
   <ItemGroup>
     <ClCompile Include="Camera.cpp" />
     <ClCompile Include="GLPreview.cpp" />
+    <ClCompile Include="gpt.cpp" />
     <ClCompile Include="Jpeg.cpp" />
     <ClCompile Include="Light.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="optimal_heuristic.cpp" />
     <ClCompile Include="random.c" />
     <ClCompile Include="TriMesh.cpp" />
   </ItemGroup>
@@ -145,6 +147,7 @@
     <ClInclude Include="GLPreview.h" />
     <ClInclude Include="Jpeg.h" />
     <ClInclude Include="Light.h" />
+    <ClInclude Include="optimal_heuristic.h" />
     <ClInclude Include="random.h" />
     <ClInclude Include="TriMesh.h" />
   </ItemGroup>

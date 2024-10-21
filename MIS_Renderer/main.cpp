@@ -44,6 +44,8 @@
 #include "GLPreview.h"
 #include "random.h"
 
+#include "optimal_heuristic.h"
+
 enum MouseMode
 {
     MM_CAMERA,
@@ -490,33 +492,27 @@ Eigen::Vector3d sampleRandomDirection(const Eigen::Vector3d& in_n) {
     return direction;
 }
 
+/* オプティマルヒューリスティック */
+double optimal_weights(const double& p, const double& p1, const double& p2)
+{
+    return 0;
+}
+
+/* パワーヒューリスティック */
+double power_weights(const double& p, const double& p1, const double& p2)
+{
+    return pow(p, 2) / (pow(p1, 2) + pow(p2, 2));
+}
 
 
-///* バランスヒューリスティック */
-//Eigen::Vector3d computeMISLighting(
-//    const std::vector<AreaLight>& in_AreaLights,
-//    const Eigen::Vector3d& in_x,
-//    const Eigen::Vector3d& in_n,
-//    const Eigen::Vector3d& in_w_eye,
-//    const RayHit& in_ray_hit,
-//    const Object& in_Object,
-//    const Material& in_Material,
-//    const int depth)
-//{
-//
-//}
+/* バランスヒューリスティック */
+double balance_weights(const double& p, const double& p1, const double& p2)
+{
+    return p / (p1 + p2);
+}
 
 
-Eigen::Vector3d computeMISLighting(
-    const std::vector<AreaLight>& in_AreaLights,
-    const Eigen::Vector3d& in_x,
-    const Eigen::Vector3d& in_n,
-    const Eigen::Vector3d& in_w_eye,
-    const RayHit& in_ray_hit,
-    const Object& in_Object,
-    const Material& in_Material,
-    const int depth,
-    const double kd)
+Eigen::Vector3d computeMISLighting(const std::vector<AreaLight>& in_AreaLights, const Eigen::Vector3d& in_x, const Eigen::Vector3d& in_n, const Eigen::Vector3d& in_w_eye, const RayHit& in_ray_hit, const Object& in_Object, const Material& in_Material, const int depth, const double kd)
 {
     // 測度の統一
     Eigen::Vector3d sampled_direction = sampleRandomDirection(in_n);
@@ -526,7 +522,6 @@ Eigen::Vector3d computeMISLighting(
     // 光源に当たったかの判定用
     bool hit_light = false;
     Eigen::Vector3d diffuse_reflection = computeDiffuseReflection(in_x, in_n, in_w_eye, in_ray_hit, in_Object, in_Material, in_AreaLights, depth, hit_light) / kd;
-
 
     // 直接寄与のPDF
     double p_direct = 0.0;
@@ -552,18 +547,16 @@ Eigen::Vector3d computeMISLighting(
     }
     else
     {
-        weight_direct = pow(p_direct, 2) / (pow(p_direct, 2) + pow(p_diffuse, 2));
+        weight_direct = balance_weights(p_direct, p_direct, p_diffuse);
 
-        weight_diffuse = pow(p_diffuse, 2) / (pow(p_direct, 2) + pow(p_diffuse, 2));
+        weight_diffuse = balance_weights(p_diffuse, p_direct, p_diffuse);
     }
-
-    /*printf("weight_direct:%f\n", weight_direct);
+    
+    
+    printf("weight_direct:%f\n", weight_direct);
     printf("weight_diffuse:%f\n", weight_diffuse);
 
-    printf("p_direct:%f\n", p_direct);
-    printf("p_diffuse:%f\n", p_diffuse);
-
-    printf("weight_direct + weight_diffuse:%f\n", weight_direct + weight_diffuse);*/
+    printf("weight_direct + weight_diffuse:%f\n", weight_direct + weight_diffuse);
 
     return weight_direct * direct_lighting + weight_diffuse * diffuse_reflection;
 }
