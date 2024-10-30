@@ -17,7 +17,7 @@ double p_diffuse = cos_theta / M_PI;
 ここもOK
 なぜなら立体角ベースに統一するから
 
- // 直接寄与のPDF　1/A*フォンファクタ
+ // 直接寄与のPDF　1/A*フォンファクタ　⇒結局1 / Aでやってる
  double p_direct = 0.0;
  for (int i = 0; i < in_AreaLights.size(); i++) {
      Eigen::Vector3d n_light = in_AreaLights[i].arm_u.cross(in_AreaLights[i].arm_v);
