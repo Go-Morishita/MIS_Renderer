@@ -32,7 +32,7 @@ double p_diffuse = cos_theta / M_PI;
  直接光のPDF = 1 / Area * フォンファクタ
  フォンファクタはこの部分
 ![image](https://github.com/user-attachments/assets/e5bff5b6-72b8-42f9-ab99-78cef18b7321)
-
+ーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーー
 これが直接光の被積分関数f(x)
 ![image](https://github.com/user-attachments/assets/1c7cd554-eb7c-4b21-a21a-e92d22206b77)
 
