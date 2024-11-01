@@ -1,7 +1,9 @@
+
 /*
 * 青山学院大学 理工学部 情報テクノロジー学科
 * 森下 剛
 * Go Morishita
+* main.cpp
 */
 
 #define EIGEN_DISABLE_UNALIGNED_ARRAY_ASSERT
@@ -29,6 +31,8 @@
 #include "random.h"
 
 #include "optimal_heuristic.h"
+
+#include <limits>
 
 enum MouseMode
 {
@@ -69,12 +73,18 @@ float* g_WeightDiffuseBuffer = nullptr;
 GLuint g_WeightDirectTexture = 0;
 GLuint g_WeightDiffuseTexture = 0;
 
+float min_WeightDirect = std::numeric_limits<float>::max();
+float max_WeightDirect = -std::numeric_limits<float>::max();
+
+float min_WeightDiffuse = std::numeric_limits<float>::max();
+float max_WeightDiffuse = -std::numeric_limits<float>::max();
+
 
 RayTracingInternalData g_RayTracingInternalData;
 
 bool g_DrawFilm = true;
 
-int width = 640 * 2;
+int width = 640 * 1.5;
 int height = 480;
 int nSamplesPerPixel = 1;
 
@@ -129,19 +139,11 @@ void resetFilm()
     memset(g_AccumulationBuffer, 0, sizeof(float) * g_FilmWidth * g_FilmHeight * 3);
     memset(g_CountBuffer, 0, sizeof(int) * g_FilmWidth * g_FilmHeight);
     memset(g_WeightDirectBuffer, 0, sizeof(float) * g_FilmWidth * g_FilmHeight * 3);
-    printf("initFilm");
     memset(g_WeightDiffuseBuffer, 0, sizeof(float) * g_FilmWidth * g_FilmHeight * 3);
 }
 
 void initFilm()
 {
-    //g_FilmBuffer = (float*)malloc(sizeof(float) * g_FilmWidth * g_FilmHeight * 3);
-    //g_AccumulationBuffer = (float*)malloc(sizeof(float) * g_FilmWidth * g_FilmHeight * 3);
-    //g_CountBuffer = (int*)malloc(sizeof(int) * g_FilmWidth * g_FilmHeight);
-    //// 重みマップ描画のための実装
-    //g_WeightDirectBuffer = (float*)malloc(sizeof(float) * g_FilmWidth * g_FilmHeight * 3);
-    //g_WeightDiffuseBuffer = (float*)malloc(sizeof(float) * g_FilmWidth * g_FilmHeight * 3);
-
     g_FilmBuffer = (float*)malloc(sizeof(float) * g_FilmWidth * g_FilmHeight * 3);
 
     g_AccumulationBuffer = (float*)malloc(sizeof(float) * g_FilmWidth * g_FilmHeight * 3);
@@ -174,6 +176,23 @@ void initFilm()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 }
 
+void calculate_RGB(double min_weight, double max_weight, double weight, double& R, double& G, double& B) {
+    /*Eigen::Vector3d min_RGB(30.0 / 256.0, 180.0 / 256.0, 230.0 / 256.0);
+    Eigen::Vector3d max_RGB(230.0 / 256.0, 180.0 / 256.0, 30.0 / 256.0);*/
+
+    Eigen::Vector3d min_RGB(0.0, 0.0, 1.0);
+    Eigen::Vector3d max_RGB(1.0, 0.0, 0.0);
+
+    double t = (weight - min_weight) / (max_weight - min_weight); // 正規化
+
+    Eigen::Vector3d interpolated_RGB = min_RGB + t * (max_RGB - min_RGB);
+
+    R = interpolated_RGB.x();
+    G = interpolated_RGB.y();
+    B = interpolated_RGB.z();
+}
+
+
 void updateFilm()
 {
     for (int i = 0; i < g_FilmWidth * g_FilmHeight; i++)
@@ -184,17 +203,19 @@ void updateFilm()
             g_FilmBuffer[i * 3 + 1] = g_AccumulationBuffer[i * 3 + 1] / g_CountBuffer[i];
             g_FilmBuffer[i * 3 + 2] = g_AccumulationBuffer[i * 3 + 2] / g_CountBuffer[i];
 
-            float weight_direct = g_WeightDirectBuffer[i * 3] / g_CountBuffer[i];
-            float weight_diffuse = g_WeightDiffuseBuffer[i * 3] / g_CountBuffer[i];
+            double R = 0.0, G = 0.0, B = 0.0;
 
+            calculate_RGB(min_WeightDirect, max_WeightDirect, g_WeightDirectBuffer[i * 3], R, G, B);
+           
+            g_WeightDirectBuffer[i * 3] = R;
+            g_WeightDirectBuffer[i * 3 + 1] = G;
+            g_WeightDirectBuffer[i * 3 + 2] = B;
 
-            g_WeightDirectBuffer[i * 3] = weight_direct;
-            g_WeightDirectBuffer[i * 3 + 1] = 0.0;
-            g_WeightDirectBuffer[i * 3 + 2] = 0.0;
+            calculate_RGB(min_WeightDiffuse, max_WeightDiffuse, g_WeightDiffuseBuffer[i * 3], R, G, B);
 
-            g_WeightDiffuseBuffer[i * 3] = weight_direct * 10;
-            g_WeightDiffuseBuffer[i * 3 + 1] = weight_diffuse * 20;
-            g_WeightDiffuseBuffer[i * 3 + 2] = 0.0;
+            g_WeightDiffuseBuffer[i * 3] = R;
+            g_WeightDiffuseBuffer[i * 3 + 1] = G;
+            g_WeightDiffuseBuffer[i * 3 + 2] = B;
         }
         else
         {
@@ -220,6 +241,12 @@ void updateFilm()
 
     glBindTexture(GL_TEXTURE_2D, g_WeightDiffuseTexture);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, g_FilmWidth, g_FilmHeight, GL_RGB, GL_FLOAT, g_WeightDiffuseBuffer);
+
+    min_WeightDirect = std::numeric_limits<float>::max();
+    max_WeightDirect = -std::numeric_limits<float>::max();
+
+    min_WeightDiffuse = std::numeric_limits<float>::max();
+    max_WeightDiffuse = -std::numeric_limits<float>::max();
 }
 
 void clearRayTracedResult()
@@ -660,13 +687,19 @@ void shadeNextPixel()
     g_AccumulationBuffer[pixel_flat_idx * 3 + 2] += I.z();
     g_CountBuffer[pixel_flat_idx] += nSamplesPerPixel;
 
-    g_WeightDirectBuffer[pixel_flat_idx * 3] += weight_direct_total;
-    g_WeightDirectBuffer[pixel_flat_idx * 3 + 1] += weight_direct_total;
-    g_WeightDirectBuffer[pixel_flat_idx * 3 + 2] += weight_direct_total;
+    g_WeightDirectBuffer[pixel_flat_idx * 3] = weight_direct_total;
+    g_WeightDirectBuffer[pixel_flat_idx * 3 + 1] = weight_direct_total;
+    g_WeightDirectBuffer[pixel_flat_idx * 3 + 2] = weight_direct_total;
 
-    g_WeightDiffuseBuffer[pixel_flat_idx * 3] += weight_diffuse_total;
-    g_WeightDiffuseBuffer[pixel_flat_idx * 3 + 1] += weight_diffuse_total;
-    g_WeightDiffuseBuffer[pixel_flat_idx * 3 + 2] += weight_diffuse_total;
+    if (weight_direct_total < min_WeightDirect && weight_direct_total != 0.0) min_WeightDirect = weight_direct_total;
+    if (max_WeightDirect < weight_direct_total) max_WeightDirect = weight_direct_total;
+
+    g_WeightDiffuseBuffer[pixel_flat_idx * 3] = weight_diffuse_total;
+    g_WeightDiffuseBuffer[pixel_flat_idx * 3 + 1] = weight_diffuse_total;
+    g_WeightDiffuseBuffer[pixel_flat_idx * 3 + 2] = weight_diffuse_total;
+
+    if (weight_diffuse_total < min_WeightDiffuse) min_WeightDiffuse = weight_diffuse_total;
+    if (max_WeightDiffuse < weight_diffuse_total) max_WeightDiffuse = weight_diffuse_total;
 }
 
 void idle()
@@ -750,8 +783,8 @@ void display()
     glClearColor(1.0, 1.0, 1.0, 0.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    glViewport(0, 0, width / 2, height);
-    projection_and_modelview(g_Camera, width / 2, height);
+    glViewport(0, 0, width * 2 / 3, height);
+    projection_and_modelview(g_Camera, width * 2 / 3, height);
     glEnable(GL_DEPTH_TEST);
 
     drawFloor();
@@ -762,8 +795,20 @@ void display()
     if (g_DrawFilm)
         drawFilm(g_Camera, g_FilmTexture);
 
-    glViewport(width / 2, 0, width / 2, height);
-    projection_and_modelview(g_Camera, width / 2, height);
+    glViewport(width * 2 / 3, height / 2, width / 3, height / 2);
+    projection_and_modelview(g_Camera, width / 3, height / 2);
+    glEnable(GL_DEPTH_TEST);
+
+    drawFloor();
+    computeGLShading(g_Obj, g_AreaLights);
+    drawObject(g_Obj);
+    drawLights(g_AreaLights);
+
+    if (g_DrawFilm)
+        drawFilm(g_Camera, g_WeightDirectTexture);
+
+    glViewport(width * 2 / 3, 0, width / 3, height / 2);
+    projection_and_modelview(g_Camera, width / 3, height / 2);
     glEnable(GL_DEPTH_TEST);
 
     drawFloor();
@@ -895,7 +940,7 @@ int main(int argc, char* argv[])
     initFilm();
     resetFilm();
     clearRayTracedResult();
-    loadObj("box2.obj", g_Obj);
+    loadObj("box3.obj", g_Obj);
 
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 
