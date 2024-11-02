@@ -881,8 +881,8 @@ void saveJpeg(const char* filename, int width, int height, unsigned char* imageD
 
 void saveScreenshot(const char* filename)
 {
-    int screenshot_width = g_FilmWidth;
-    int screenshot_height = g_FilmHeight;
+    int screenshot_width = width;
+    int screenshot_height = height;
     std::vector<unsigned char> pixels(screenshot_width * screenshot_height * 3);
 
     glReadPixels(0, 0, screenshot_width, screenshot_height, GL_RGB, GL_UNSIGNED_BYTE, &pixels[0]);
@@ -940,11 +940,11 @@ int main(int argc, char* argv[])
     initFilm();
     resetFilm();
     clearRayTracedResult();
-    loadObj("box3.obj", g_Obj);
+    loadObj("box2.obj", g_Obj);
 
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 
-    glutTimerFunc(20000, timer, 0);
+    glutTimerFunc(200000, timer, 0);
 
     glutMainLoop();
     return 0;
