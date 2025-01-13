@@ -1,11 +1,3 @@
-
-/*
-* 青山学院大学 理工学部 情報テクノロジー学科
-* 森下 剛
-* Go Morishita
-* main.cpp
-*/
-
 #define EIGEN_DISABLE_UNALIGNED_ARRAY_ASSERT
 #define EIGEN_DONT_VECTORIZE
 
@@ -30,10 +22,6 @@
 #include "GLPreview.h"
 #include "random.h"
 
-#include "optimal_heuristic.h"
-
-#include <limits>
-
 enum MouseMode
 {
     MM_CAMERA,
@@ -55,7 +43,9 @@ struct RayHit
     int primitive_idx; // < 0: no intersection
     bool isFront;
 };
-;
+
+const int WEIGHTS_RENDERING_METHOD = 0;
+
 const double __FAR__ = 1.0e33;
 const int MAX_RAY_DEPTH = 8;
 
@@ -78,7 +68,6 @@ float max_WeightDirect = -std::numeric_limits<float>::max();
 
 float min_WeightDiffuse = std::numeric_limits<float>::max();
 float max_WeightDiffuse = -std::numeric_limits<float>::max();
-
 
 RayTracingInternalData g_RayTracingInternalData;
 
@@ -176,7 +165,8 @@ void initFilm()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 }
 
-void calculate_RGB(double min_weight, double max_weight, double weight, double& R, double& G, double& B) {
+void calculate_RGB(double min_weight, double max_weight, double weight, double& R, double& G, double& B)
+{
     /*Eigen::Vector3d min_RGB(30.0 / 256.0, 180.0 / 256.0, 230.0 / 256.0);
     Eigen::Vector3d max_RGB(230.0 / 256.0, 180.0 / 256.0, 30.0 / 256.0);*/
 
@@ -192,6 +182,18 @@ void calculate_RGB(double min_weight, double max_weight, double weight, double& 
     B = interpolated_RGB.z();
 }
 
+void calculate_RGB_non_normalized(double weight, double& R, double& G, double& B)
+{
+    Eigen::Vector3d min_RGB(0.0, 0.0, 1.0);
+    Eigen::Vector3d max_RGB(1.0, 0.0, 0.0);
+
+    double t = weight;
+    Eigen::Vector3d interpolated_RGB = min_RGB + t * (max_RGB - min_RGB);
+
+    R = interpolated_RGB.x();
+    G = interpolated_RGB.y();
+    B = interpolated_RGB.z();
+}
 
 void updateFilm()
 {
@@ -205,13 +207,27 @@ void updateFilm()
 
             double R = 0.0, G = 0.0, B = 0.0;
 
-            calculate_RGB(min_WeightDirect, max_WeightDirect, g_WeightDirectBuffer[i * 3], R, G, B);
-           
+            if (WEIGHTS_RENDERING_METHOD == 0)
+            {
+                calculate_RGB(min_WeightDirect, max_WeightDirect, g_WeightDirectBuffer[i * 3], R, G, B);
+            }
+            else
+            {
+                calculate_RGB_non_normalized(g_WeightDirectBuffer[i * 3], R, G, B);
+            }
+
             g_WeightDirectBuffer[i * 3] = R;
             g_WeightDirectBuffer[i * 3 + 1] = G;
             g_WeightDirectBuffer[i * 3 + 2] = B;
 
-            calculate_RGB(min_WeightDiffuse, max_WeightDiffuse, g_WeightDiffuseBuffer[i * 3], R, G, B);
+            if (WEIGHTS_RENDERING_METHOD == 0)
+            {
+                calculate_RGB(min_WeightDiffuse, max_WeightDiffuse, g_WeightDiffuseBuffer[i * 3], R, G, B);
+            }
+            else
+            {
+                calculate_RGB_non_normalized(g_WeightDiffuseBuffer[i * 3], R, G, B);
+            }
 
             g_WeightDiffuseBuffer[i * 3] = R;
             g_WeightDiffuseBuffer[i * 3 + 1] = G;
@@ -400,21 +416,20 @@ void rayTracing(const Object& in_Object, const std::vector<AreaLight>& in_AreaLi
     io_Hit.isFront = isFront;
 }
 
-Eigen::Vector3d sampleRandomPoint(const AreaLight& in_Light, double r1, double r2)
+Eigen::Vector3d sampleRandomPoint(const AreaLight& in_Light, const double rand_num_1, const double rand_num_2)
 {
-    const double u = 2.0 * r1 - 1.0;
-    const double v = 2.0 * r2 - 1.0;
-    return in_Light.pos + u * in_Light.arm_u + v * in_Light.arm_v;
+    const double r1 = 2.0 * rand_num_1 - 1.0;
+    const double r2 = 2.0 * rand_num_2 - 1.0;
+    return in_Light.pos + r1 * in_Light.arm_u + r2 * in_Light.arm_v;
 }
 
-// randを変更
-Eigen::Vector3d computeDirectLighting(const std::vector<AreaLight>& in_AreaLights, const Eigen::Vector3d& in_x, const Eigen::Vector3d& in_n, const Eigen::Vector3d& in_w_eye, const RayHit& in_ray_hit, const Object& in_Object, const Material& in_Material, const int depth, double r1, double r2, double& PDF)
+Eigen::Vector3d computeDirectLighting(const std::vector<AreaLight>& in_AreaLights, const Eigen::Vector3d& in_x, const Eigen::Vector3d& in_n, const Eigen::Vector3d& in_w_eye, const RayHit& in_ray_hit, const Object& in_Object, const Material& in_Material, const int depth, const double rand_num_1, const double rand_num_2, double& p)
 {
     Eigen::Vector3d direct_light_contribution = Eigen::Vector3d::Zero();
 
     for (int i = 0; i < in_AreaLights.size(); i++)
     {
-        const Eigen::Vector3d p_light = sampleRandomPoint(in_AreaLights[i], r1, r2);
+        const Eigen::Vector3d p_light = sampleRandomPoint(in_AreaLights[i], rand_num_1, rand_num_2);
         Eigen::Vector3d w_L = p_light - in_x;
         const double dist = w_L.norm();
         w_L.normalize();
@@ -422,12 +437,9 @@ Eigen::Vector3d computeDirectLighting(const std::vector<AreaLight>& in_AreaLight
         Eigen::Vector3d n_light = in_AreaLights[i].arm_u.cross(in_AreaLights[i].arm_v);
         const double area = n_light.norm() * 4.0;
         n_light.normalize();
-
-        const double cos_theta = std::max<double>(0.0, w_L.dot(in_n));
         const double cosT_l = n_light.dot(-w_L);
 
-        // PDF += area * cos_theta * cosT_l / (dist * dist);
-        PDF += 1.0 / area;
+        p += 1.0 / (area * dist * dist);
 
         if (cosT_l <= 0.0) continue;
 
@@ -439,6 +451,7 @@ Eigen::Vector3d computeDirectLighting(const std::vector<AreaLight>& in_AreaLight
         if (rh.mesh_idx < 0 && rh.primitive_idx == i)
         {
             // diffuse
+            const double cos_theta = std::max<double>(0.0, w_L.dot(in_n));
             direct_light_contribution += area * in_AreaLights[i].color.cwiseProduct(in_Material.kd) * in_AreaLights[i].intensity * cos_theta * cosT_l / (M_PI * dist * dist);
         }
     }
@@ -465,22 +478,7 @@ Eigen::Vector3d computeRayHitNormal(const Object& in_Object, const RayHit& in_Hi
     return n;
 }
 
-Eigen::Vector3d sampleRandomDirection(const Eigen::Vector3d& in_n, double r1, double r2) {
-
-    const double theta = acos(sqrt(r1));
-    const double phi = r2 * 2.0 * M_PI;
-
-    const double _dx = sin(theta) * cos(phi);
-    const double _dy = cos(theta);
-    const double _dz = sin(theta) * sin(phi);
-
-    Eigen::Vector3d direction = Eigen::Vector3d(_dx, _dy, _dz);
-    direction.normalize();
-
-    return direction;
-}
-
-Eigen::Vector3d computeDiffuseReflection(const Eigen::Vector3d& in_x, const Eigen::Vector3d& in_n, const Eigen::Vector3d& in_w_eye, const RayHit& in_ray_hit, const Object& in_Object, const Material& in_Material, const std::vector<AreaLight>& in_AreaLights, const int depth, bool& hit_light, double r1, double r2, double& out_weight_direct, double& out_weight_diffuse)
+Eigen::Vector3d computeDiffuseReflection(const Eigen::Vector3d& in_x, const Eigen::Vector3d& in_n, const Eigen::Vector3d& in_w_eye, const RayHit& in_ray_hit, const Object& in_Object, const Material& in_Material, const std::vector<AreaLight>& in_AreaLights, const int depth, const double rand_num_1, const double rand_num_2, Eigen::Vector3d& random_direction, double& out_weight_direct, double& out_weight_diffuse)
 {
     Eigen::Vector3d bn = in_Object.meshes[in_ray_hit.mesh_idx].vertices[in_Object.meshes[in_ray_hit.mesh_idx].triangles[in_ray_hit.primitive_idx].x()] - in_Object.meshes[in_ray_hit.mesh_idx].vertices[in_Object.meshes[in_ray_hit.mesh_idx].triangles[in_ray_hit.primitive_idx].z()];
 
@@ -488,9 +486,16 @@ Eigen::Vector3d computeDiffuseReflection(const Eigen::Vector3d& in_x, const Eige
 
     const Eigen::Vector3d cn = bn.cross(in_n);
 
-    const Eigen::Vector3d sampled_direction = sampleRandomDirection(in_n, r1, r2);
+    const double theta = acos(sqrt(rand_num_1));
+    const double phi = rand_num_2 * 2.0 * M_PI;
 
-    Eigen::Vector3d w_L = sampled_direction.x() * bn + sampled_direction.y() * in_n + sampled_direction.z() * cn;
+    const double _dx = sin(theta) * cos(phi);
+    const double _dy = cos(theta);
+    const double _dz = sin(theta) * sin(phi);
+
+    random_direction = Eigen::Vector3d(_dx, _dy, _dz);
+
+    Eigen::Vector3d w_L = _dx * bn + _dy * in_n + _dz * cn;
     w_L.normalize();
 
     Ray ray;
@@ -499,141 +504,61 @@ Eigen::Vector3d computeDiffuseReflection(const Eigen::Vector3d& in_x, const Eige
 
     RayHit new_ray_hit;
     rayTracing(in_Object, in_AreaLights, ray, new_ray_hit);
-    
-    // もし光源にぶつかったら hit_light を true にする。
+
+    // exclude the case when the ray directly hits a light source, so as not to
+    // double count the direct light contribution (we are already accounting for the
+    // direct light contribution in computeDirectLighting() ).
+    if (new_ray_hit.mesh_idx >= 0 && new_ray_hit.primitive_idx >= 0)
+    {
+        return computeShading(ray, new_ray_hit, in_Object, in_AreaLights, out_weight_direct, out_weight_diffuse);
+    }
+
+    return Eigen::Vector3d::Zero();
+}
+
+boolean isHit(const Eigen::Vector3d& in_x, const Eigen::Vector3d& in_n, const Eigen::Vector3d& in_w_eye, const RayHit& in_ray_hit, const Object& in_Object, const Material& in_Material, const std::vector<AreaLight>& in_AreaLights, const int depth, const double rand_num_1, const double rand_num_2)
+{
+    Eigen::Vector3d bn = in_Object.meshes[in_ray_hit.mesh_idx].vertices[in_Object.meshes[in_ray_hit.mesh_idx].triangles[in_ray_hit.primitive_idx].x()] - in_Object.meshes[in_ray_hit.mesh_idx].vertices[in_Object.meshes[in_ray_hit.mesh_idx].triangles[in_ray_hit.primitive_idx].z()];
+
+    bn.normalize();
+
+    const Eigen::Vector3d cn = bn.cross(in_n);
+
+    const double theta = acos(sqrt(rand_num_1));
+    const double phi = rand_num_2 * 2.0 * M_PI;
+
+    const double _dx = sin(theta) * cos(phi);
+    const double _dy = cos(theta);
+    const double _dz = sin(theta) * sin(phi);
+
+    Eigen::Vector3d w_L = _dx * bn + _dy * in_n + _dz * cn;
+    w_L.normalize();
+
+    Ray ray;
+    ray.o = in_x; ray.d = w_L; ray.depth = depth + 1;
+    ray.prev_mesh_idx = in_ray_hit.mesh_idx; ray.prev_primitive_idx = in_ray_hit.primitive_idx;
+
+    RayHit new_ray_hit;
+    rayTracing(in_Object, in_AreaLights, ray, new_ray_hit); // isHitでRayが飛ばされちゃってるからずれるかも...いったん無視
 
     if (new_ray_hit.mesh_idx >= 0 && new_ray_hit.primitive_idx >= 0)
     {
-        hit_light = false;
-    }else{
-        hit_light = true;
+        return false;
     }
 
-    return computeShading(ray, new_ray_hit, in_Object, in_AreaLights, out_weight_direct, out_weight_diffuse);
+    return true;
 }
 
-//Eigen::Vector3d computeReflection(const Eigen::Vector3d& in_x, const Eigen::Vector3d& in_n, const Eigen::Vector3d& in_w_eye, const RayHit& in_ray_hit, const Object& in_Object, const Material& in_Material, const std::vector<AreaLight>& in_AreaLights, const int depth)
-//{
-//    const double e_dot_n = in_w_eye.dot(in_n);
-//    Eigen::Vector3d w_L = 2.0 * in_n * e_dot_n - in_w_eye;
-//    w_L.normalize();
-//
-//    Ray ray;
-//    ray.o = in_x; ray.d = w_L; ray.depth = depth + 1;
-//    ray.prev_mesh_idx = in_ray_hit.mesh_idx; ray.prev_primitive_idx = in_ray_hit.primitive_idx;
-//
-//    RayHit new_ray_hit;
-//    rayTracing(in_Object, in_AreaLights, ray, new_ray_hit);
-//
-//    if (new_ray_hit.primitive_idx >= 0)
-//    {
-//        return computeShading(ray, new_ray_hit, in_Object, in_AreaLights);
-//    }
-//
-//    return Eigen::Vector3d::Zero();
-//}
-//
-//Eigen::Vector3d computeRefraction(const Eigen::Vector3d& in_x, const Eigen::Vector3d& in_n, const Eigen::Vector3d& in_w_eye, const RayHit& in_ray_hit, const Object& in_Object, const Material& in_Material, const std::vector<AreaLight>& in_AreaLights, const int depth)
-//{
-//    const double e_dot_n = in_w_eye.dot(in_n);
-//    const double eta = in_ray_hit.isFront ? in_Material.eta : 1.0 / in_Material.eta;
-//
-//    const double inside_sqrt = 1.0 - eta * eta * (1.0 - e_dot_n * e_dot_n);
-//    if (inside_sqrt < 0.0)
-//    {
-//        return computeReflection(in_x, in_n, in_w_eye, in_ray_hit, in_Object, in_Material, in_AreaLights, depth);
-//    }
-//    else
-//    {
-//        Eigen::Vector3d w_t = -in_n * sqrt(inside_sqrt) - eta * (in_w_eye - e_dot_n * in_n);
-//        w_t.normalize();
-//
-//        Ray ray;
-//        ray.o = in_x; ray.d = w_t; ray.depth = depth + 1;
-//        ray.prev_mesh_idx = in_ray_hit.mesh_idx; ray.prev_primitive_idx = in_ray_hit.primitive_idx;
-//
-//        RayHit new_ray_hit;
-//        rayTracing(in_Object, in_AreaLights, ray, new_ray_hit);
-//
-//        if (new_ray_hit.primitive_idx >= 0)
-//        {
-//            return computeShading(ray, new_ray_hit, in_Object, in_AreaLights);
-//        }
-//
-//        return Eigen::Vector3d::Zero();
-//    }
-//}
-
-/* オプティマルヒューリスティック */
-double optimal_weights(const double& p, const double& p1, const double& p2)
-{
-    return 0;
-}
-
-/* パワーヒューリスティック */
-double power_weights(const double& p, const double& p1, const double& p2)
-{
-    return pow(p, 2) / (pow(p1, 2) + pow(p2, 2));
-}
-
-
-/* バランスヒューリスティック */
 double balance_weights(const double& p, const double& p1, const double& p2)
 {
     return p / (p1 + p2);
 }
 
-
-/* 実装 */
-Eigen::Vector3d computeMISLighting(const std::vector<AreaLight>& in_AreaLights, const Eigen::Vector3d& in_x, const Eigen::Vector3d& in_n, const Eigen::Vector3d& in_w_eye, const RayHit& in_ray_hit, const Object& in_Object, const Material& in_Material, const int depth, const double kd, double& out_weight_direct, double& out_weight_diffuse)
-{
-    // 直接光源のPDF
-    double p_direct = 0.0;
-
-    // 測度の統一
-    double r1 = randomMT();
-    double r2 = randomMT();
-
-    Eigen::Vector3d direct_lighting = computeDirectLighting(in_AreaLights, in_x, in_n, in_w_eye, in_ray_hit, in_Object, in_Material, depth, r1, r2, p_direct);
-
-    // 光源に当たったかの判定用
-    bool hit_light = false;
-    Eigen::Vector3d diffuse_reflection = computeDiffuseReflection(in_x, in_n, in_w_eye, in_ray_hit, in_Object, in_Material, in_AreaLights, depth, hit_light, r1, r2, out_weight_direct, out_weight_diffuse) / kd;
-
-    // 立体角ベースに直す
-    // 拡散反射のPDF
-    double cos_theta = std::max(0.0, in_n.dot(sampleRandomDirection(in_n, r1, r2).normalized()));
-    double p_diffuse = cos_theta / M_PI;
-
-    double weight_direct = 0.0;
-    double weight_diffuse = 0.0;
-
-    if (hit_light == true)
-    {
-        weight_direct = 1.0;
-        weight_diffuse = 0.0;
-    }
-    else
-    {
-        weight_direct = balance_weights(p_direct, p_direct, p_diffuse);
-
-        weight_diffuse = balance_weights(p_diffuse, p_direct, p_diffuse);
-    }
-    
-    /*printf("weight_direct:%f\n", weight_direct);
-    printf("weight_diffuse:%f\n", weight_diffuse);
-
-    printf("weight_direct + weight_diffuse:%f\n", weight_direct + weight_diffuse);*/
-
-    out_weight_direct = weight_direct;
-    out_weight_diffuse = weight_diffuse;
-
-    return weight_direct * direct_lighting + weight_diffuse * diffuse_reflection;
-}
-
 Eigen::Vector3d computeShading(const Ray& in_Ray, const RayHit& in_RayHit, const Object& in_Object, const std::vector<AreaLight>& in_AreaLights, double& out_weight_direct, double& out_weight_diffuse)
 {
-    if (in_RayHit.mesh_idx < 0)
+    // if( in_Ray.depth > MAX_RAY_DEPTH ) return Eigen::Vector3d::Zero();
+
+    if (in_RayHit.mesh_idx < 0) // the ray has hit an area light
     {
         if (!in_RayHit.isFront)
             return Eigen::Vector3d::Zero();
@@ -644,10 +569,44 @@ Eigen::Vector3d computeShading(const Ray& in_Ray, const RayHit& in_RayHit, const
     const Eigen::Vector3d x = in_Ray.o + in_RayHit.t * in_Ray.d;
     const Eigen::Vector3d n = computeRayHitNormal(in_Object, in_RayHit);
 
+    Eigen::Vector3d I = Eigen::Vector3d::Zero();
+
     const double kd_max = in_Object.meshes[in_RayHit.mesh_idx].material.kd.maxCoeff();
 
-    /* 変更 */
-    return computeMISLighting(in_AreaLights, x, n, -in_Ray.d, in_RayHit, in_Object, in_Object.meshes[in_RayHit.mesh_idx].material, in_Ray.depth, kd_max, out_weight_direct, out_weight_diffuse);
+    // random of direct lighting.
+    const double r1 = randomMT();
+    const double r2 = randomMT();
+
+    Eigen::Vector3d lighting;
+    Eigen::Vector3d direct_lighting;
+    Eigen::Vector3d diffuse_lighting;
+
+    double p_direct = 0.0;
+    double p_diffuse = 0.0;
+
+    Eigen::Vector3d random_direction = Eigen::Vector3d::Zero();
+
+    if (isHit(x, n, -in_Ray.d, in_RayHit, in_Object, in_Object.meshes[in_RayHit.mesh_idx].material, in_AreaLights, in_Ray.depth, r1, r2))
+    {
+        direct_lighting = computeDirectLighting(in_AreaLights, x, n, -in_Ray.d, in_RayHit, in_Object, in_Object.meshes[in_RayHit.mesh_idx].material, in_Ray.depth, r1, r2, p_direct);
+
+        diffuse_lighting = in_Object.meshes[in_RayHit.mesh_idx].material.kd.cwiseProduct(computeDiffuseReflection(x, n, -in_Ray.d, in_RayHit, in_Object, in_Object.meshes[in_RayHit.mesh_idx].material, in_AreaLights, in_Ray.depth, r1, r2, random_direction, out_weight_direct, out_weight_diffuse)) / kd_max;
+
+        double cos_theta = n.dot(random_direction);
+        double p_diffuse = cos_theta / M_PI;
+
+        // printf("weight_direct_0:%f\n", balance_weights(p_direct, p_direct, p_diffuse));
+        // printf("weight_direct_1:%f\n", balance_weights(p_diffuse, p_direct, p_diffuse));
+
+        out_weight_direct = balance_weights(p_direct, p_direct, p_diffuse);
+        out_weight_diffuse = balance_weights(p_diffuse, p_direct, p_diffuse);
+
+        return direct_lighting * out_weight_direct + diffuse_lighting * out_weight_diffuse;
+    }
+    else
+    {
+        return computeShading(in_Ray, in_RayHit, in_Object, in_AreaLights, out_weight_direct, out_weight_diffuse);
+    }
 }
 
 void shadeNextPixel()
@@ -665,9 +624,11 @@ void shadeNextPixel()
         double p_x = (g_RayTracingInternalData.nextPixel_i + randomMT()) / g_FilmWidth;
         double p_y = (g_RayTracingInternalData.nextPixel_j + randomMT()) / g_FilmHeight;
 
-        Ray ray; ray.depth = 0;
+        Ray ray;
+        ray.depth = 0;
         g_Camera.screenView(p_x, p_y, ray);
-        ray.prev_mesh_idx = -99; ray.prev_primitive_idx = -1;
+        ray.prev_mesh_idx = -99;
+        ray.prev_primitive_idx = -1;
 
         RayHit ray_hit;
         rayTracing(g_Obj, g_AreaLights, ray, ray_hit);
@@ -691,27 +652,32 @@ void shadeNextPixel()
     g_WeightDirectBuffer[pixel_flat_idx * 3 + 1] = weight_direct_total;
     g_WeightDirectBuffer[pixel_flat_idx * 3 + 2] = weight_direct_total;
 
-    if (weight_direct_total < min_WeightDirect && weight_direct_total != 0.0) min_WeightDirect = weight_direct_total;
-    if (max_WeightDirect < weight_direct_total) max_WeightDirect = weight_direct_total;
+    if (weight_direct_total < min_WeightDirect && weight_direct_total != 0.0)
+        min_WeightDirect = weight_direct_total;
+    if (max_WeightDirect < weight_direct_total)
+        max_WeightDirect = weight_direct_total;
 
     g_WeightDiffuseBuffer[pixel_flat_idx * 3] = weight_diffuse_total;
     g_WeightDiffuseBuffer[pixel_flat_idx * 3 + 1] = weight_diffuse_total;
     g_WeightDiffuseBuffer[pixel_flat_idx * 3 + 2] = weight_diffuse_total;
 
-    if (weight_diffuse_total < min_WeightDiffuse) min_WeightDiffuse = weight_diffuse_total;
-    if (max_WeightDiffuse < weight_diffuse_total) max_WeightDiffuse = weight_diffuse_total;
+    if (weight_diffuse_total < min_WeightDiffuse)
+        min_WeightDiffuse = weight_diffuse_total;
+    if (max_WeightDiffuse < weight_diffuse_total)
+        max_WeightDiffuse = weight_diffuse_total;
 }
 
 void idle()
 {
 #ifdef __APPLE__
-    //usleep( 1000*1000 / 60 );
+    // usleep( 1000*1000 / 60 );
     usleep(1000 / 60);
 #else
     Sleep(1000.0 / 60.0);
 #endif
 
-    for (int i = 0; i < g_FilmWidth * g_FilmHeight; i++) shadeNextPixel();
+    for (int i = 0; i < g_FilmWidth * g_FilmHeight; i++)
+        shadeNextPixel();
     updateFilm();
 
     glutPostRedisplay();
@@ -720,7 +686,8 @@ void idle()
 void mouseDrag(int x, int y)
 {
     int _dx = x - mx, _dy = y - my;
-    mx = x; my = y;
+    mx = x;
+    my = y;
 
     double dx = double(_dx) / double(width);
     double dy = -double(_dy) / double(height);
@@ -747,7 +714,8 @@ void mouseDrag(int x, int y)
 
 void mouseDown(int x, int y)
 {
-    mx = x; my = y;
+    mx = x;
+    my = y;
 }
 
 void mouse(int button, int state, int x, int y)
@@ -824,7 +792,6 @@ void display()
     glutSwapBuffers();
 }
 
-
 void resize(int w, int h)
 {
     width = w;
@@ -855,7 +822,7 @@ void saveJpeg(const char* filename, int width, int height, unsigned char* imageD
     // Set parameters for compression
     cinfo.image_width = width;
     cinfo.image_height = height;
-    cinfo.input_components = 3; // Number of color components (RGB)
+    cinfo.input_components = 3;     // Number of color components (RGB)
     cinfo.in_color_space = JCS_RGB; // Color space (RGB)
 
     // Set default compression parameters
@@ -949,3 +916,4 @@ int main(int argc, char* argv[])
     glutMainLoop();
     return 0;
 }
+
