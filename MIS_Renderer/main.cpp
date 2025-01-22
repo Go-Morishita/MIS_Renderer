@@ -12,6 +12,7 @@
 
 #define _USE_MATH_DEFINES
 #include <math.h>
+#include <cmath>
 #include <vector>
 #include <iostream>
 
@@ -47,6 +48,7 @@ struct RayHit
 const int WEIGHTS_RENDERING_METHOD = 0;
 
 const double __FAR__ = 1.0e33;
+const double EPSILON = 1e-6;
 const int MAX_RAY_DEPTH = 8;
 
 const int g_FilmWidth = 640;
@@ -379,7 +381,7 @@ void rayTracing(const Object& in_Object, const std::vector<AreaLight>& in_AreaLi
 
             RayHit temp_hit;
             rayTriangleIntersect(in_Object.meshes[m], k, in_Ray, temp_hit);
-            if (temp_hit.t < t_min)
+            if (temp_hit.t < t_min) // より近いメッシュが見つかった場合は更新する.
             {
                 t_min = temp_hit.t;
                 alpha_I = temp_hit.alpha;
@@ -498,6 +500,7 @@ Eigen::Vector3d computeDiffuseReflection(const Eigen::Vector3d& in_x, const Eige
     Eigen::Vector3d w_L = _dx * bn + _dy * in_n + _dz * cn;
     w_L.normalize();
 
+    // ランダムな方向を生成
     Ray ray;
     ray.o = in_x; ray.d = w_L; ray.depth = depth + 1;
     ray.prev_mesh_idx = in_ray_hit.mesh_idx; ray.prev_primitive_idx = in_ray_hit.primitive_idx;
@@ -595,11 +598,17 @@ Eigen::Vector3d computeShading(const Ray& in_Ray, const RayHit& in_RayHit, const
         double cos_theta = n.dot(random_direction);
         double p_diffuse = cos_theta / M_PI;
 
-        // printf("weight_direct_0:%f\n", balance_weights(p_direct, p_direct, p_diffuse));
-        // printf("weight_direct_1:%f\n", balance_weights(p_diffuse, p_direct, p_diffuse));
+       /* printf("weight_direct_0:%f\n", balance_weights(p_direct, p_direct, p_diffuse));
+        printf("weight_direct_1:%f\n", balance_weights(p_diffuse, p_direct, p_diffuse));*/
 
         out_weight_direct = balance_weights(p_direct, p_direct, p_diffuse);
         out_weight_diffuse = balance_weights(p_diffuse, p_direct, p_diffuse);
+
+        double weight_sum = out_weight_direct + out_weight_diffuse;
+
+        if (std::abs(weight_sum - 1.0)> EPSILON) {
+            printf("Sum of weights is not 1.\n");
+        }
 
         return direct_lighting * out_weight_direct + diffuse_lighting * out_weight_diffuse;
     }
